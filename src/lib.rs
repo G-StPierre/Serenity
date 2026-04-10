@@ -1,12 +1,15 @@
 use nih_plug::prelude::*;
-use std::f32::consts;
 use std::sync::Arc;
 
-use crate::envelope::{Envelope, EnvelopeParams};
+use crate::{
+    envelope::{Envelope, EnvelopeParams},
+    oscillator::Oscillator,
+};
 
 mod envelope;
+mod oscillator;
 
-#[derive(Enum, PartialEq)]
+#[derive(Enum, PartialEq, Clone, Copy)]
 pub enum WaveType {
     Sine,
     Square,
@@ -17,10 +20,10 @@ pub enum WaveType {
 pub struct Serenity {
     params: Arc<SerenityParams>,
     envelope: Envelope,
+    oscillators: Vec<Oscillator>,
     midi_note_id: u8,
-    midi_note_freq: f32,
-    sample_rate: f32,
-    phase: f32,
+    current_freq: f32,
+    sample_rate: f32, // I'm not sure I really need this at the vst level, only really at the oscillators, but I'll hold onto it for the future rn.
 }
 
 impl Default for Serenity {
@@ -28,73 +31,23 @@ impl Default for Serenity {
         Serenity {
             params: Arc::new(SerenityParams::default()),
             envelope: Envelope::default(),
+            oscillators: vec![Oscillator::default()],
             midi_note_id: 0,
-            midi_note_freq: 1.0,
-            sample_rate: 1.0,
-            phase: 0.0,
+            current_freq: 0.0,
+            sample_rate: 44100.0,
         }
     }
 }
 
 impl Serenity {
     fn calculate_wave(&mut self, frequency: f32) -> f32 {
-        match self.params.wave_type.value() {
-            WaveType::Sine => self.calculate_sine(frequency),
-            WaveType::Square => self.calculate_square(frequency),
-            WaveType::Saw => self.calculate_saw(frequency),
-            WaveType::Triangle => self.calculate_triangle(frequency),
-        }
-    }
-
-    fn calculate_sine(&mut self, frequency: f32) -> f32 {
-        let phase_delta = frequency / self.sample_rate;
-        let sine = (self.phase * consts::TAU).sin();
-
-        self.phase += phase_delta;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
+        let mut sample = 0.0;
+        let wave_type = self.params.wave_type.value();
+        for oscillator in self.oscillators.iter_mut() {
+            sample += oscillator.calculate_wave(wave_type, frequency);
         }
 
-        sine
-    }
-
-    // Seems like either Band-Limited Impulse Train or Band-limited Step Function will round this a bit and make it sound less harsh https://www.metafunction.co.uk/post/all-about-digital-oscillators-part-2-blits-bleps
-    fn calculate_square(&mut self, frequency: f32) -> f32 {
-        let phase_delta = frequency / self.sample_rate;
-        let square = if self.phase < 0.5 { 1.0 } else { -1.0 };
-
-        self.phase += phase_delta;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
-
-        square
-    }
-
-    fn calculate_saw(&mut self, frequency: f32) -> f32 {
-        let phase_delta = frequency / self.sample_rate;
-
-        let saw = (self.phase * 2.0) - 1.0;
-
-        self.phase += phase_delta;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
-
-        saw
-    }
-
-    fn calculate_triangle(&mut self, frequency: f32) -> f32 {
-        let phase_delta = frequency / self.sample_rate;
-
-        let triangle = 4.0 * (self.phase - 0.5).abs() - 1.0;
-
-        self.phase += phase_delta;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
-
-        triangle
+        sample / self.oscillators.len() as f32
     }
 }
 
@@ -104,6 +57,10 @@ struct SerenityParams {
     pub use_midi: BoolParam,
     #[id = "wavetype"]
     pub wave_type: EnumParam<WaveType>,
+    #[id = "oscillators"]
+    pub oscillators: IntParam,
+    #[id = "detune"]
+    pub detune: FloatParam,
     #[nested(group = "ADSR")]
     pub envelope: EnvelopeParams,
 }
@@ -113,6 +70,15 @@ impl Default for SerenityParams {
         SerenityParams {
             use_midi: BoolParam::new("USE MIDI", false),
             wave_type: EnumParam::new("Wave Type", WaveType::Sine),
+            oscillators: IntParam::new("Oscillators", 1, IntRange::Linear { min: 1, max: 5 }), // I honestly don't know what max should be, I chose 5 because I'm pretty sure serum uses 5 but I should look into why?
+            detune: FloatParam::new(
+                "Detune",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 50.0,
+                },
+            ),
             envelope: EnvelopeParams::default(),
         }
     }
@@ -179,6 +145,8 @@ impl Plugin for Serenity {
 
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
             let wave = if self.params.use_midi.value() {
+                let mut freq = 0.0;
+
                 while let Some(event) = next_event {
                     if event.timing() > sample_id as u32 {
                         break;
@@ -187,9 +155,8 @@ impl Plugin for Serenity {
                     match event {
                         NoteEvent::NoteOn { note, .. } => {
                             self.midi_note_id = note;
-                            self.midi_note_freq = util::midi_note_to_freq(note);
+                            self.current_freq = util::midi_note_to_freq(note);
                             self.envelope.note_on();
-                            self.phase = 0.0;
                         }
                         NoteEvent::NoteOff { .. } => {
                             self.envelope.note_off();
@@ -200,7 +167,7 @@ impl Plugin for Serenity {
                     next_event = context.next_event();
                 }
 
-                self.calculate_wave(self.midi_note_freq)
+                self.calculate_wave(self.current_freq)
             } else {
                 0.0
             };
