@@ -4,8 +4,6 @@ use crate::WaveType;
 
 pub struct Oscillator {
     phase: f32,
-    frequency: f32,
-    detune: f32,
     sample_rate: f32,
 }
 
@@ -13,8 +11,6 @@ impl Default for Oscillator {
     fn default() -> Self {
         Oscillator {
             phase: 0.0,
-            frequency: 0.0,
-            detune: 0.0,
             sample_rate: 44100.0,
         }
     }
@@ -23,7 +19,6 @@ impl Default for Oscillator {
 impl Oscillator {
     pub fn calculate_wave(&mut self, wave_type: WaveType, frequency: f32) -> f32 {
         match wave_type {
-            // !!! Account for detune here
             WaveType::Sine => self.calculate_sine(frequency),
             WaveType::Square => self.calculate_square(frequency),
             WaveType::Saw => self.calculate_saw(frequency),

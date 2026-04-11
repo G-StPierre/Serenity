@@ -43,11 +43,20 @@ impl Serenity {
     fn calculate_wave(&mut self, frequency: f32) -> f32 {
         let mut sample = 0.0;
         let wave_type = self.params.wave_type.value();
-        for oscillator in self.oscillators.iter_mut() {
-            sample += oscillator.calculate_wave(wave_type, frequency);
+        let oscillator_count = self.oscillators.len();
+        let spread = self.params.detune.value();
+
+        for (i, oscillator) in self.oscillators.iter_mut().enumerate() {
+            let offset_cents = if oscillator_count == 1 {
+                0.0
+            } else {
+                (i as f32 / (oscillator_count - 1) as f32) * (spread * 2.0) - spread
+            };
+            let detuned_freq = frequency * 2.0_f32.powf(offset_cents / 1200.0);
+            sample += oscillator.calculate_wave(wave_type, detuned_freq);
         }
 
-        sample / self.oscillators.len() as f32
+        sample / oscillator_count as f32
     }
 }
 
@@ -143,10 +152,19 @@ impl Plugin for Serenity {
 
         self.envelope.update_params(&self.params.envelope); // Should be called every 64 - 128 samples rather than ever single sample -  https://nih-plug.robbertvanderhelm.nl/nih_plug/buffer/struct.Buffer.html
 
+        let desired_oscillator_count = self.params.oscillators.value() as usize;
+        let oscillator_count = self.oscillators.len();
+
+        if desired_oscillator_count > oscillator_count {
+            for _ in 0..(desired_oscillator_count - oscillator_count) {
+                self.oscillators.push(Oscillator::default());
+            }
+        } else if desired_oscillator_count < oscillator_count {
+            self.oscillators.truncate(desired_oscillator_count);
+        }
+
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
             let wave = if self.params.use_midi.value() {
-                let mut freq = 0.0;
-
                 while let Some(event) = next_event {
                     if event.timing() > sample_id as u32 {
                         break;
