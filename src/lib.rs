@@ -40,23 +40,33 @@ impl Default for Serenity {
 }
 
 impl Serenity {
-    fn calculate_wave(&mut self, frequency: f32) -> f32 {
-        let mut sample = 0.0;
+    fn calculate_wave(&mut self, frequency: f32) -> (f32, f32) {
+        // let mut sample = 0.0;
+
+        let mut left = 0.0;
+        let mut right = 0.0;
+
         let wave_type = self.params.wave_type.value();
         let oscillator_count = self.oscillators.len();
         let spread = self.params.detune.value();
 
         for (i, oscillator) in self.oscillators.iter_mut().enumerate() {
-            let offset_cents = if oscillator_count == 1 {
-                0.0
+            let (offset_cents, pan) = if oscillator_count == 1 {
+                (0.0, 0.0)
             } else {
-                (i as f32 / (oscillator_count - 1) as f32) * (spread * 2.0) - spread
+                let temp = i as f32 / (oscillator_count - 1) as f32;
+                (temp * (spread * 2.0) - spread, temp * 2.0 - 1.0)
             };
+
             let detuned_freq = frequency * 2.0_f32.powf(offset_cents / 1200.0);
-            sample += oscillator.calculate_wave(wave_type, detuned_freq);
+            let sample = oscillator.calculate_wave(wave_type, detuned_freq);
+
+            // Constant panning law - https://www.cs.cmu.edu/~music/icm-online/readings/panlaws/
+            left += sample * ((1.0 - pan) / 2.0).sqrt() * 2.0_f32.sqrt();
+            right += sample * ((1.0 - pan) / 2.0).sqrt() * 2.0_f32.sqrt();
         }
 
-        sample / oscillator_count as f32
+        (left, right)
     }
 }
 
@@ -164,7 +174,7 @@ impl Plugin for Serenity {
         }
 
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
-            let wave = if self.params.use_midi.value() {
+            let (left, right) = if self.params.use_midi.value() {
                 while let Some(event) = next_event {
                     if event.timing() > sample_id as u32 {
                         break;
@@ -187,13 +197,17 @@ impl Plugin for Serenity {
 
                 self.calculate_wave(self.current_freq)
             } else {
-                0.0
+                (0.0, 0.0)
             };
 
             let volume = self.envelope.next_amp();
 
-            for sample in channel_samples {
-                *sample = wave * volume;
+            for (channel_idx, sample) in channel_samples.into_iter().enumerate() {
+                *sample = match channel_idx {
+                    0 => left * volume,
+                    1 => right * volume,
+                    _ => 0.0,
+                }
             }
         }
 
