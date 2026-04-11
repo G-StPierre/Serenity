@@ -1,6 +1,6 @@
 use nih_plug::{
     params::{FloatParam, Params},
-    prelude::FloatRange,
+    prelude::{Enum, FloatRange},
 };
 
 #[derive(Params)]
@@ -47,7 +47,8 @@ impl Default for EnvelopeParams {
     }
 }
 
-enum EnvelopeState {
+#[derive(Enum, PartialEq, Clone, Copy)]
+pub enum EnvelopeState {
     Idle,
     Attack,
     Decay,
@@ -90,10 +91,14 @@ impl Envelope {
         }
     }
 
+    pub fn is_idle(&self) -> bool {
+        matches!(self.state, EnvelopeState::Idle)
+    }
+
     pub fn update_params(&mut self, params: &EnvelopeParams) {
         self.envelope_steps.attack = self.calculate_step(params.attack.value(), self.sample_rate);
         self.envelope_steps.decay = self.calculate_step(params.decay.value(), self.sample_rate);
-        self.envelope_steps.release = self.calculate_step(params.release.value(), self.sample_rate);
+        self.envelope_steps.release = self.calculate_step(params.release.value(), self.sample_rate); // Some sort of popping going on with super long releases, will have to look into it
         self.sustain = params.sustain.value();
     }
 
