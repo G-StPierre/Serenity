@@ -25,7 +25,7 @@ pub struct Serenity {
     params: Arc<SerenityParams>,
     voices: Vec<Voice>,
     envelope: Envelope,
-    oscillators: Vec<Oscillator>,
+    pitch_bend: f32,
     sample_rate: f32, // I'm not sure I really need this at the vst level, only really at the oscillators, but I'll hold onto it for the future rn.
 }
 
@@ -35,7 +35,7 @@ impl Default for Serenity {
             params: Arc::new(SerenityParams::default()),
             voices: (0..MAX_VOICES).map(|_| Voice::default()).collect(), // If I have a specific amount maybe I don't want a vector, maybe just an array?
             envelope: Envelope::default(),
-            oscillators: vec![Oscillator::default()],
+            pitch_bend: 0.5,
             sample_rate: 44100.0,
         }
     }
@@ -50,8 +50,11 @@ impl Serenity {
             if voice.midi_note_id.is_none() {
                 continue;
             }
-            let result =
-                voice.calculate_wave(self.params.wave_type.value(), self.params.detune.value());
+            let result = voice.calculate_wave(
+                self.params.wave_type.value(),
+                self.params.detune.value(),
+                self.pitch_bend,
+            );
             left += result.0;
             right += result.1;
         }
@@ -81,6 +84,20 @@ impl Serenity {
             }
         }
         empty.unwrap_or(slot)
+    }
+
+    fn update_oscillator_count(&mut self, count: usize) {
+        let oscillator_count = self.voices[0].oscillators.len(); // I might have to fix this, now that I use voices!
+
+        for voice in self.voices.iter_mut() {
+            if count > oscillator_count {
+                for _ in 0..(count - oscillator_count) {
+                    voice.oscillators.push(Oscillator::default());
+                }
+            } else if count < oscillator_count {
+                voice.oscillators.truncate(count);
+            }
+        }
     }
 }
 
@@ -145,7 +162,7 @@ impl Plugin for Serenity {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
 
     type SysExMessage = ();
     type BackgroundTask = ();
@@ -183,18 +200,8 @@ impl Plugin for Serenity {
 
         self.envelope.update_params(&self.params.envelope); // Should be called every 64 - 128 samples rather than ever single sample -  https://nih-plug.robbertvanderhelm.nl/nih_plug/buffer/struct.Buffer.html
 
-        // let voice_count = self.voices.len();
-
         let desired_oscillator_count = self.params.oscillators.value() as usize;
-        let oscillator_count = self.oscillators.len();
-
-        if desired_oscillator_count > oscillator_count {
-            for _ in 0..(desired_oscillator_count - oscillator_count) {
-                self.oscillators.push(Oscillator::default());
-            }
-        } else if desired_oscillator_count < oscillator_count {
-            self.oscillators.truncate(desired_oscillator_count);
-        }
+        self.update_oscillator_count(desired_oscillator_count);
 
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
             let (left, right) = if self.params.use_midi.value() {
@@ -215,6 +222,9 @@ impl Plugin for Serenity {
                                     voice.envelope.note_off();
                                 }
                             }
+                        }
+                        NoteEvent::MidiPitchBend { value, .. } => {
+                            self.pitch_bend = value;
                         }
                         _ => (),
                     }

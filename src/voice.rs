@@ -3,7 +3,7 @@ use nih_plug::util;
 use crate::{WaveType, envelope::Envelope, oscillator::Oscillator};
 
 pub struct Voice {
-    oscillators: Vec<Oscillator>,
+    pub oscillators: Vec<Oscillator>,
     pub envelope: Envelope,
     pub midi_note_id: Option<u8>, // None if voice is not in use
     pub frequency: f32,
@@ -23,9 +23,17 @@ impl Default for Voice {
 }
 
 impl Voice {
-    pub fn calculate_wave(&mut self, wave_type: WaveType, spread: f32) -> (f32, f32) {
+    pub fn calculate_wave(
+        &mut self,
+        wave_type: WaveType,
+        spread: f32,
+        pitch_bend: f32,
+    ) -> (f32, f32) {
         let mut left = 0.0;
         let mut right = 0.0;
+
+        let pitch_bend_range = 1200.0; // i could probably make this user configurable in the future, not sure how other synths do it, should look into it
+        let pitch_cents = (pitch_bend - 0.5) * 2.0 * pitch_bend_range;
 
         let oscillator_count = self.oscillators.len();
 
@@ -37,13 +45,13 @@ impl Voice {
                 (temp * (spread * 2.0) - spread, temp * 2.0 - 1.0)
             };
 
-            let detuned_freq = self.frequency * 2.0_f32.powf(offset_cents / 1200.0);
+            let detuned_freq = self.frequency * 2.0_f32.powf((offset_cents + pitch_cents) / 1200.0);
             let sample = oscillator.calculate_wave(wave_type, detuned_freq);
 
             // Constant panning law - https://www.cs.cmu.edu/~music/icm-online/readings/panlaws/
-            left += sample * ((1.0 - pan) / 2.0).sqrt() * 2.0_f32.sqrt() * self.envelope.next_amp();
-            right +=
-                sample * ((1.0 + pan) / 2.0).sqrt() * 2.0_f32.sqrt() * self.envelope.next_amp();
+            let amp = self.envelope.next_amp();
+            left += sample * ((1.0 - pan) / 2.0).sqrt() * 2.0_f32.sqrt() * amp;
+            right += sample * ((1.0 + pan) / 2.0).sqrt() * 2.0_f32.sqrt() * amp;
         }
 
         (left, right)
