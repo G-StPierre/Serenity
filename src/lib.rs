@@ -71,6 +71,7 @@ impl Serenity {
                 self.params.wave_type.value(),
                 self.params.detune.value(),
                 self.pitch_bend,
+                self.params.cutoff.value(),
             );
             left += result.0;
             right += result.1;
@@ -128,6 +129,8 @@ struct SerenityParams {
     pub oscillators: IntParam,
     #[id = "detune"]
     pub detune: FloatParam,
+    #[id = "lowpass"]
+    pub cutoff: FloatParam,
     #[nested(group = "ADSR")]
     pub envelope: EnvelopeParams,
     #[persist = "editor-state"]
@@ -148,6 +151,7 @@ impl Default for SerenityParams {
                     max: 50.0,
                 },
             ),
+            cutoff: FloatParam::new("Cutoff", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 }),
             envelope: EnvelopeParams::default(),
             editor_state: EguiState::from_size(400, 400),
         }

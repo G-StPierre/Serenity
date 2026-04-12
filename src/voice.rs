@@ -6,8 +6,9 @@ pub struct Voice {
     pub oscillators: Vec<Oscillator>,
     pub envelope: Envelope,
     pub midi_note_id: Option<u8>, // None if voice is not in use
-    pub frequency: f32,
+    frequency: f32,
     pub age: u8, // only 128 midi notes so u8 should be fine
+    filter_state: f32,
 }
 
 impl Default for Voice {
@@ -18,6 +19,7 @@ impl Default for Voice {
             midi_note_id: None,
             frequency: 0.0,
             age: 0,
+            filter_state: 0.0,
         }
     }
 }
@@ -28,6 +30,7 @@ impl Voice {
         wave_type: WaveType,
         spread: f32,
         pitch_bend: f32,
+        cutoff: f32,
     ) -> (f32, f32) {
         let mut left = 0.0;
         let mut right = 0.0;
@@ -48,10 +51,15 @@ impl Voice {
             let detuned_freq = self.frequency * 2.0_f32.powf((offset_cents + pitch_cents) / 1200.0);
             let sample = oscillator.calculate_wave(wave_type, detuned_freq);
 
+            // https://en.wikipedia.org/wiki/Low-pass_filter - Simple infinite impulse response filter
+            let cutoff = cutoff.powf(3.0); // cutoff is really weak until you hit 0.1, hopefully this will mitigate that a bit.
+            self.filter_state = self.filter_state + cutoff * (sample - self.filter_state);
+            let filtered_sample = self.filter_state;
+
             // Constant panning law - https://www.cs.cmu.edu/~music/icm-online/readings/panlaws/
             let amp = self.envelope.next_amp();
-            left += sample * ((1.0 - pan) / 2.0).sqrt() * 2.0_f32.sqrt() * amp;
-            right += sample * ((1.0 + pan) / 2.0).sqrt() * 2.0_f32.sqrt() * amp;
+            left += filtered_sample * ((1.0 - pan) / 2.0).sqrt() * 2.0_f32.sqrt() * amp;
+            right += filtered_sample * ((1.0 + pan) / 2.0).sqrt() * 2.0_f32.sqrt() * amp;
         }
 
         (left, right)
