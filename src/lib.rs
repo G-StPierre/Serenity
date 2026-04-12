@@ -1,4 +1,10 @@
+use egui_knob::{Knob, KnobStyle, LabelPosition};
 use nih_plug::prelude::*;
+use nih_plug_egui::{
+    EguiState, create_egui_editor,
+    egui::{self, Vec2},
+    resizable_window::ResizableWindow,
+};
 use std::sync::Arc;
 
 use crate::{
@@ -19,6 +25,17 @@ pub enum WaveType {
     Square,
     Saw,
     Triangle,
+}
+
+impl WaveType {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Sine => Self::Square,
+            Self::Square => Self::Saw,
+            Self::Saw => Self::Triangle,
+            Self::Triangle => Self::Sine,
+        }
+    }
 }
 
 pub struct Serenity {
@@ -113,6 +130,8 @@ struct SerenityParams {
     pub detune: FloatParam,
     #[nested(group = "ADSR")]
     pub envelope: EnvelopeParams,
+    #[persist = "editor-state"]
+    editor_state: Arc<EguiState>,
 }
 
 impl Default for SerenityParams {
@@ -130,6 +149,7 @@ impl Default for SerenityParams {
                 },
             ),
             envelope: EnvelopeParams::default(),
+            editor_state: EguiState::from_size(400, 400),
         }
     }
 }
@@ -183,6 +203,137 @@ impl Plugin for Serenity {
         self.params.clone()
     }
 
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let params = self.params.clone();
+        let egui_state = params.editor_state.clone();
+        create_egui_editor(
+            self.params.editor_state.clone(),
+            (),
+            |_, _| {},
+            move |egui_ctx, setter, _state| {
+                ResizableWindow::new("res-wind")
+                    .min_size(Vec2::new(400.0, 400.0))
+                    .show(egui_ctx, egui_state.as_ref(), |ui| {
+                        if ui.add(egui::Button::new("Change Waveform")).clicked() {
+                            setter
+                                .set_parameter(&params.wave_type, params.wave_type.value().next());
+                        }
+
+                        ui.horizontal(|ui| {
+                            let mut attack_value = params.envelope.attack.value();
+                            if ui
+                                .add(
+                                    Knob::new(&mut attack_value, 0.0, 10000.0, KnobStyle::Wiper)
+                                        .with_size(50.0)
+                                        .with_colors(
+                                            egui::Color32::GRAY,
+                                            egui::Color32::WHITE,
+                                            egui::Color32::WHITE,
+                                        )
+                                        .with_label("Attack", LabelPosition::Top),
+                                )
+                                .changed()
+                            {
+                                setter.set_parameter(&params.envelope.attack, attack_value);
+                            }
+
+                            let mut decay_value = params.envelope.decay.value();
+                            if ui
+                                .add(
+                                    Knob::new(&mut decay_value, 0.0, 10000.0, KnobStyle::Wiper)
+                                        .with_size(50.0)
+                                        .with_colors(
+                                            egui::Color32::GRAY,
+                                            egui::Color32::WHITE,
+                                            egui::Color32::WHITE,
+                                        )
+                                        .with_label("Decay", LabelPosition::Top),
+                                )
+                                .changed()
+                            {
+                                setter.set_parameter(&params.envelope.decay, decay_value);
+                            }
+
+                            let mut sustain_value = params.envelope.sustain.value();
+                            if ui
+                                .add(
+                                    Knob::new(&mut sustain_value, 0.0, 1.0, KnobStyle::Wiper)
+                                        .with_size(50.0)
+                                        .with_colors(
+                                            egui::Color32::GRAY,
+                                            egui::Color32::WHITE,
+                                            egui::Color32::WHITE,
+                                        )
+                                        .with_label("Sustain", LabelPosition::Top),
+                                )
+                                .changed()
+                            {
+                                setter.set_parameter(&params.envelope.sustain, sustain_value);
+                            }
+
+                            let mut release_value = params.envelope.release.value();
+                            if ui
+                                .add(
+                                    Knob::new(&mut release_value, 0.0, 10000.0, KnobStyle::Wiper)
+                                        .with_size(50.0)
+                                        .with_colors(
+                                            egui::Color32::GRAY,
+                                            egui::Color32::WHITE,
+                                            egui::Color32::WHITE,
+                                        )
+                                        .with_label("Release", LabelPosition::Top),
+                                )
+                                .changed()
+                            {
+                                setter.set_parameter(&params.envelope.release, release_value);
+                            }
+
+                            ui.allocate_space(egui::Vec2::splat(2.0));
+                        });
+
+                        ui.horizontal(|ui| {
+                            // Oscillator knob is a bit (or a lot) sensitive.
+
+                            let mut oscillator_count = params.oscillators.value() as f32;
+                            if ui
+                                .add(
+                                    Knob::new(&mut oscillator_count, 0.0, 5.0, KnobStyle::Wiper)
+                                        .with_size(50.0)
+                                        .with_step(1.0)
+                                        .with_colors(
+                                            egui::Color32::GRAY,
+                                            egui::Color32::WHITE,
+                                            egui::Color32::WHITE,
+                                        )
+                                        .with_label("Oscillators", LabelPosition::Top),
+                                )
+                                .changed()
+                            {
+                                setter.set_parameter(&params.oscillators, oscillator_count as i32);
+                            }
+
+                            let mut detune_value = params.detune.value();
+                            if ui
+                                .add(
+                                    Knob::new(&mut detune_value, 0.0, 50.0, KnobStyle::Wiper)
+                                        .with_size(50.0)
+                                        .with_colors(
+                                            egui::Color32::GRAY,
+                                            egui::Color32::WHITE,
+                                            egui::Color32::WHITE,
+                                        )
+                                        .with_label("Detune", LabelPosition::Top),
+                                )
+                                .changed()
+                            {
+                                setter.set_parameter(&params.detune, detune_value);
+                            }
+                        });
+                    });
+            },
+        )
+    }
+
     fn process(
         &mut self,
         buffer: &mut Buffer,
@@ -214,7 +365,6 @@ impl Plugin for Serenity {
                         NoteEvent::NoteOn { note, .. } => {
                             let slot = self.find_new_voice();
                             self.voices.get_mut(slot).unwrap().set_voice(note);
-                            nih_log!("assigning note {} to slot {}", note, slot);
                         }
                         NoteEvent::NoteOff { note, .. } => {
                             for voice in self.voices.iter_mut() {

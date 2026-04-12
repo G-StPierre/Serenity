@@ -7,4 +7,6 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+egui_knob = "0.2"
 nih-plug = { git = "https://github.com/robbert-vdh/nih-plug.git", package = "nih_plug" }
+nih-plug-egui = { git = "https://github.com/robbert-vdh/nih-plug.git", package = "nih_plug_egui" }
